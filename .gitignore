@@ -1,0 +1,16 @@
+# OS
+.DS_Store
+.Identifier
+
+# IDE
+.vscode
+.idea
+.swp
+
+# Binairies
+.o
+.a
+.so
+
+# Project specifics
+b
