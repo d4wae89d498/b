@@ -11,6 +11,8 @@
 .o
 .a
 .so
+.out
 
 # Project specifics
 b
+
