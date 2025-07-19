@@ -13,8 +13,10 @@ $(OUT): $(SRC) $(X86) b.h
 clean:
 	rm -f $(OUT) out.s
 
-test: $(OUT) test.b
-	./$(OUT) -S test.b > out.s
-	@echo "Assembly written to out.s" 
+.PHONY: test
+
+test: $(OUT)
+	chmod +x test_runner.sh
+	./test_runner.sh
 
 re: clean all

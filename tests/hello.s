@@ -1,3 +1,4 @@
+.intel_syntax noprefix
 .data
 .data
 str0: .asciz "Hello world"
@@ -6,11 +7,11 @@ str0: .asciz "Hello world"
 main:
     push ebp
     mov ebp, esp
-    sub esp, 0 ; locals
-    lea eax, [str0] ; string literal
-    push eax ; arg 0
+    sub esp, 0 #locals
+    lea eax, [str0] #string literal
+    push eax #arg 0
     call printf
-    add esp, 4 ; pop args
+    add esp, 4 #pop args
     mov esp, ebp
     pop ebp
     ret

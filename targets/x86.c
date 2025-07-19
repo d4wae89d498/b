@@ -2,6 +2,8 @@
 #include "../b.h"
 #include <string.h>
 
+#define ASMEND "#"
+
 static void gen_lvalue(ASTNode *expr, FILE *out);
 static void gen_expr(ASTNode *expr, FILE *out);
 static void gen_stmt(ASTNode *stmt, FILE *out);
@@ -122,18 +124,18 @@ static void gen_lvalue(ASTNode *expr, FILE *out) {
         case AST_VAR: {
             int off = find_var_offset(expr->data.var.name);
             if (off == 0x7fffffff) {
-                fprintf(out, "    lea eax, [%s] ; global %s\n", expr->data.var.name, expr->data.var.name);
+                fprintf(out, "    lea eax, [%s] " ASMEND "global %s\n", expr->data.var.name, expr->data.var.name);
             } else {
-                fprintf(out, "    lea eax, [ebp%+d] ; var %s\n", off, expr->data.var.name);
+                fprintf(out, "    lea eax, [ebp%+d] " ASMEND "var %s\n", off, expr->data.var.name);
             }
             break;
         }
         case AST_INDEX: {
             gen_expr(expr->data.index.array, out); // base address in eax
-            fprintf(out, "    push eax ; base\n");
+            fprintf(out, "    push eax " ASMEND "base\n");
             gen_expr(expr->data.index.index, out); // index in eax
-            fprintf(out, "    pop ebx ; base\n");
-            fprintf(out, "    lea eax, [ebx+eax*4] ; array index\n");
+            fprintf(out, "    pop ebx " ASMEND "base\n");
+            fprintf(out, "    lea eax, [ebx+eax*4] " ASMEND "array index\n");
             break;
         }
         case AST_UNOP: // address-of
@@ -197,20 +199,20 @@ static void gen_expr(ASTNode *expr, FILE *out) {
             break;
         case AST_VAR: {
             if (is_function_name(expr->data.var.name, top_level_funcs)) {
-                fprintf(out, "    lea eax, [%s] ; function pointer\n", expr->data.var.name);
+                fprintf(out, "    lea eax, [%s] " ASMEND "function pointer\n", expr->data.var.name);
             } else {
                 int off = find_var_offset(expr->data.var.name);
                 if (off == 0x7fffffff) {
-                    fprintf(out, "    mov eax, [%s] ; global %s\n", expr->data.var.name, expr->data.var.name);
+                    fprintf(out, "    mov eax, [%s] " ASMEND "global %s\n", expr->data.var.name, expr->data.var.name);
                 } else {
-                    fprintf(out, "    mov eax, [ebp%+d] ; var %s\n", off, expr->data.var.name);
+                    fprintf(out, "    mov eax, [ebp%+d] " ASMEND "var %s\n", off, expr->data.var.name);
                 }
             }
             break;
         }
         case AST_INDEX: {
             gen_lvalue(expr, out);
-            fprintf(out, "    mov eax, [eax] ; load array element\n");
+            fprintf(out, "    mov eax, [eax] " ASMEND "load array element\n");
             break;
         }
         case AST_UNOP:
@@ -218,10 +220,10 @@ static void gen_expr(ASTNode *expr, FILE *out) {
                 gen_expr(expr->data.unop.expr, out);
                 fprintf(out, "    cmp eax, 0\n");
                 fprintf(out, "    sete al\n");
-                fprintf(out, "    movzx eax, al ; logical not\n");
+                fprintf(out, "    movzx eax, al " ASMEND "logical not\n");
             } else if (strcmp(expr->data.unop.op, "*") == 0) {
                 gen_expr(expr->data.unop.expr, out);
-                fprintf(out, "    mov eax, [eax] ; deref\n");
+                fprintf(out, "    mov eax, [eax] " ASMEND "deref\n");
             } else if (strcmp(expr->data.unop.op, "&") == 0) {
                 gen_lvalue(expr->data.unop.expr, out);
             } else {
@@ -269,7 +271,7 @@ static void gen_expr(ASTNode *expr, FILE *out) {
                 } else if (strcmp(expr->data.binop.op, ">=") == 0) {
                     fprintf(out, "    setge al\n");
                 }
-                fprintf(out, "    movzx eax, al ; relational result\n");
+                fprintf(out, "    movzx eax, al " ASMEND "relational result\n");
             } else if (strcmp(expr->data.binop.op, "&&") == 0) {
                 int l_false = label_count++;
                 int l_end = label_count++;
@@ -303,11 +305,11 @@ static void gen_expr(ASTNode *expr, FILE *out) {
             }
             break;
         case AST_CHAR:
-            fprintf(out, "    mov eax, %d ; char literal\n", (unsigned char)expr->data.char_lit.value);
+            fprintf(out, "    mov eax, %d " ASMEND "char literal\n", (unsigned char)expr->data.char_lit.value);
             break;
         case AST_STRING: {
             const char *label = get_string_label(expr->data.string_lit.value);
-            fprintf(out, "    lea eax, [%s] ; string literal\n", label);
+            fprintf(out, "    lea eax, [%s] " ASMEND "string literal\n", label);
             break;
         }
         case AST_CALL: {
@@ -318,18 +320,18 @@ static void gen_expr(ASTNode *expr, FILE *out) {
             for (ASTNodeList *l = expr->data.call.args; l; l = l->next) args[i++] = l;
             for (int j = argc-1; j >= 0; --j) {
                 gen_expr(args[j]->node, out);
-                fprintf(out, "    push eax ; arg %d\n", j);
+                fprintf(out, "    push eax " ASMEND "arg %d\n", j);
             }
             if (expr->data.call.name) {
                 fprintf(out, "    call %s\n", expr->data.call.name);
             } else if (expr->data.call.left) {
                 gen_expr(expr->data.call.left, out);
-                fprintf(out, "    call eax ; indirect call\n");
+                fprintf(out, "    call eax " ASMEND "indirect call\n");
             } else {
                 fprintf(out, "; invalid call node\n");
             }
             if (argc > 0)
-                fprintf(out, "    add esp, %d ; pop args\n", argc*4);
+                fprintf(out, "    add esp, %d " ASMEND "pop args\n", argc*4);
             break;
         }
         default:
@@ -353,10 +355,10 @@ static void gen_stmt(ASTNode *stmt, FILE *out) {
             break;
         case AST_ASSIGN:
             gen_lvalue(stmt->data.assign.var, out);
-            fprintf(out, "    push eax ; save lvalue addr\n");
+            fprintf(out, "    push eax " ASMEND "save lvalue addr\n");
             gen_expr(stmt->data.assign.expr, out);
-            fprintf(out, "    pop ebx ; restore lvalue addr\n");
-            fprintf(out, "    mov [ebx], eax ; assign\n");
+            fprintf(out, "    pop ebx " ASMEND "restore lvalue addr\n");
+            fprintf(out, "    mov [ebx], eax " ASMEND "assign\n");
             break;
         case AST_IF: {
             int l_else = label_count++;
@@ -423,14 +425,14 @@ static void gen_stmt(ASTNode *stmt, FILE *out) {
         }
         case AST_BREAK:
             if (loop_depth > 0) {
-                fprintf(out, "    jmp .L%d ; break\n", break_labels[loop_depth-1]);
+                fprintf(out, "    jmp .L%d " ASMEND "break\n", break_labels[loop_depth-1]);
             } else {
                 fprintf(out, "; break outside loop (ignored)\n");
             }
             break;
         case AST_CONTINUE:
             if (loop_depth > 0) {
-                fprintf(out, "    jmp .L%d ; continue\n", continue_labels[loop_depth-1]);
+                fprintf(out, "    jmp .L%d " ASMEND "continue\n", continue_labels[loop_depth-1]);
             } else {
                 fprintf(out, "; continue outside loop (ignored)\n");
             }
@@ -447,7 +449,7 @@ static void gen_stmt(ASTNode *stmt, FILE *out) {
             fprintf(out, ".L_%s:\n", stmt->data.label.label);
             break;
         case AST_GOTO:
-            fprintf(out, "    jmp .L_%s ; goto\n", stmt->data.go.label);
+            fprintf(out, "    jmp .L_%s " ASMEND "goto\n", stmt->data.go.label);
             break;
         case AST_STATEMENT:
             gen_expr(stmt->data.statement.stmt, out);
@@ -474,7 +476,7 @@ static void gen_function(ASTNode *fn, FILE *out) {
     // Prologue
     fprintf(out, "    push ebp\n");
     fprintf(out, "    mov ebp, esp\n");
-    fprintf(out, "    sub esp, %d ; locals\n", -stack_offset);
+    fprintf(out, "    sub esp, %d " ASMEND "locals\n", -stack_offset);
     // Body
     if (fn->data.function.body)
         gen_stmt(fn->data.function.body, out);
@@ -548,6 +550,8 @@ void generate_x86(ASTNode *ast, FILE *out) {
     num_strings = 0;
     collect_globals(ast);
     collect_strings(ast);
+    // Emit .intel_syntax noprefix at the top
+    fprintf(out, ".intel_syntax noprefix\n");
     if (num_globals > 0 || num_strings > 0) {
         fprintf(out, ".data\n");
         for (int i = 0; i < num_globals; ++i) {

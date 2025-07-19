@@ -6,6 +6,8 @@
 #include "targets/x86.c"
 
 ASTNodeList *top_level_funcs = NULL;
+// Add a global variable for the current filename
+const char *current_filename = NULL;
 // --- Utility Functions ---
 ASTNode *make_node(ASTNodeType type);
 ASTNodeList *append_node(ASTNodeList *list, ASTNode *node);
@@ -63,6 +65,7 @@ int main(int argc, char **argv) {
     fclose(f);
     Parser parser;
     parser_init(&parser, src);
+    current_filename = filename;
     ASTNode *ast = parse_program(&parser);
     if (ast) {
         if (dump_asm) {
@@ -339,15 +342,25 @@ int parser_next(Parser *p) {
     return p->cur;
 }
 void parser_skip_ws(Parser *p) {
-    while (isspace(p->cur)) parser_next(p);
-    // skip comments
-    if (p->cur == '/' && p->src[p->pos+1] == '*') {
-        parser_next(p); parser_next(p);
-        while (p->cur && !(p->cur == '*' && p->src[p->pos+1] == '/')) {
-            parser_next(p);
+    while (1) {
+        // Skip whitespace
+        while (isspace(p->cur)) parser_next(p);
+        // Skip C-style comments /* ... */
+        if (p->cur == '/' && p->src[p->pos+1] == '*') {
+            parser_next(p); parser_next(p);
+            while (p->cur && !(p->cur == '*' && p->src[p->pos+1] == '/')) {
+                parser_next(p);
+            }
+            if (p->cur) { parser_next(p); parser_next(p); }
+            continue;
         }
-        if (p->cur) { parser_next(p); parser_next(p); }
-        parser_skip_ws(p);
+        // Skip C++-style comments // ...
+        if (p->cur == '/' && p->src[p->pos+1] == '/') {
+            parser_next(p); parser_next(p);
+            while (p->cur && p->cur != '\n') parser_next(p);
+            continue;
+        }
+        break;
     }
 }
 int parser_match(Parser *p, const char *kw) {
@@ -360,7 +373,10 @@ int parser_match(Parser *p, const char *kw) {
     return 0;
 }
 void parser_error(Parser *p, const char *msg) {
-    fprintf(stderr, "Parse error at line %d col %d: %s\n", p->line, p->col, msg);
+    if (current_filename)
+        fprintf(stderr, "Parse error at %s:%d:%d: %s\n", current_filename, p->line, p->col, msg);
+    else
+        fprintf(stderr, "Parse error at <input>:%d:%d: %s\n", p->line, p->col, msg);
     exit(1);
 }
 
