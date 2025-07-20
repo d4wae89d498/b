@@ -1,18 +1,18 @@
 # OS
 .DS_Store
-.Identifier
+*.Identifier
 
 # IDE
 .vscode
 .idea
-.swp
+*.swp
 
 # Binairies
-.o
-.a
-.so
-.out
+*.o
+*.a
+*.so
+*.out
 
 # Project specifics
 b
-
+tests/*.s 
