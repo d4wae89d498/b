@@ -3,7 +3,7 @@
 #include <string.h>
 #include <ctype.h>
 #include "b.h"
-#include "targets/x86.c"
+#include "targets/x86/b2as.c"
 
 ASTNodeList *top_level_funcs = NULL;
 // Add a global variable for the current filename
@@ -68,9 +68,9 @@ int main(int argc, char **argv) {
     current_filename = filename;
     ASTNode *ast = parse_program(&parser);
     if (ast) {
-        if (dump_asm) {
-            generate_x86(ast, stdout);
-        } else {
+        generate_x86(ast, stdout);
+        exit(0);
+        if (!dump_asm) {
             print_ast(ast, 0);
         }
         free_ast(ast);
@@ -129,12 +129,6 @@ void free_ast(ASTNode *node) {
             free_ast(node->data.while_stmt.cond);
             free_ast(node->data.while_stmt.body);
             break;
-        case AST_FOR:
-            free_ast(node->data.for_stmt.init);
-            free_ast(node->data.for_stmt.cond);
-            free_ast(node->data.for_stmt.step);
-            free_ast(node->data.for_stmt.body);
-            break;
         case AST_RETURN:
             free_ast(node->data.ret.expr);
             break;
@@ -182,6 +176,9 @@ void free_ast(ASTNode *node) {
         case AST_GOTO:
             free(node->data.go.label);
             break;
+        case AST_META:
+            free(node->data.meta.content);
+            break;
         default: break;
     }
     free(node);
@@ -226,17 +223,6 @@ void print_ast(ASTNode *node, int indent) {
             print_ast(node->data.while_stmt.cond, indent+4);
             print_indent(indent+2); printf("Body:\n");
             print_ast(node->data.while_stmt.body, indent+4);
-            break;
-        case AST_FOR:
-            printf("For\n");
-            print_indent(indent+2); printf("Init:\n");
-            print_ast(node->data.for_stmt.init, indent+4);
-            print_indent(indent+2); printf("Cond:\n");
-            print_ast(node->data.for_stmt.cond, indent+4);
-            print_indent(indent+2); printf("Step:\n");
-            print_ast(node->data.for_stmt.step, indent+4);
-            print_indent(indent+2); printf("Body:\n");
-            print_ast(node->data.for_stmt.body, indent+4);
             break;
         case AST_RETURN:
             printf("Return\n");
@@ -317,6 +303,9 @@ void print_ast(ASTNode *node, int indent) {
             break;
         case AST_GOTO:
             printf("Goto: %s\n", node->data.go.label);
+            break;
+        case AST_META:
+            printf("Meta: %s\n", node->data.meta.content);
             break;
         default:
             printf("(Unknown node)\n");
@@ -572,10 +561,9 @@ ASTNode *parse_postfix(Parser *p) {
         return NULL;
     }
     parser_skip_ws(p);
-    // Allow chains of calls and array accesses on any expression
+    // Allow chains of calls, array accesses, and postfix ++/-- on any expression
     while (1) {
         if (parser_peek(p) == '(') {
-            // Function call on any expression
             expect(p, '(');
             ASTNodeList *args = NULL;
             parser_skip_ws(p);
@@ -593,7 +581,7 @@ ASTNode *parse_postfix(Parser *p) {
             }
             expect(p, ')');
             ASTNode *call = make_node(AST_CALL);
-            call->data.call.name = NULL; // Not a named call
+            call->data.call.name = NULL;
             call->data.call.args = args;
             call->data.call.left = node;
             node = call;
@@ -605,6 +593,14 @@ ASTNode *parse_postfix(Parser *p) {
             arr->data.index.array = node;
             arr->data.index.index = idx;
             node = arr;
+        } else if ((parser_peek(p) == '+' && p->src[p->pos+1] == '+') || (parser_peek(p) == '-' && p->src[p->pos+1] == '-')) {
+            char op[3] = { (char)parser_peek(p), (char)parser_peek(p), 0 };
+            parser_next(p); parser_next(p);
+            ASTNode *n = make_node(AST_UNOP);
+            n->data.unop.op = strdup2(op, 2);
+            n->data.unop.expr = node;
+            n->data.unop.is_postfix = 1; // postfix
+            node = n;
         } else {
             break;
         }
@@ -617,12 +613,14 @@ ASTNode *parse_postfix(Parser *p) {
 ASTNode *parse_unary(Parser *p) {
     parser_skip_ws(p);
     int c = parser_peek(p);
-    if (c == '-' || c == '+' || c == '*' || c == '&') {
-        char op[2] = { (char)c, 0 };
-        parser_next(p);
+    // Handle prefix ++ and --
+    if ((c == '+' && p->src[p->pos+1] == '+') || (c == '-' && p->src[p->pos+1] == '-')) {
+        char op[3] = { (char)c, (char)c, 0 };
+        parser_next(p); parser_next(p);
         ASTNode *n = make_node(AST_UNOP);
-        n->data.unop.op = strdup2(op, 1);
+        n->data.unop.op = strdup2(op, 2);
         n->data.unop.expr = parse_unary(p);
+        n->data.unop.is_postfix = 0; // prefix
         return n;
     }
     return parse_primary(p);
@@ -631,12 +629,17 @@ ASTNode *parse_unary(Parser *p) {
 // --- Operator precedence and recognition ---
 typedef struct { const char *op; int prec; } OpPrec;
 static const OpPrec op_table[] = {
+    {"=", 0},
     {"||", 1},
     {"&&", 2},
     {"==", 3}, {"!=", 3},
-    {"<", 4}, {">", 4}, {"<=", 4}, {">=", 4},
+    {">=", 4}, {"<=", 4}, {">>", 4}, {"<<", 4},
+    {">", 4}, {"<", 4},
     {"+", 5}, {"-", 5},
-    {"*", 6}, {"/", 6}, {"%", 6},
+    {"&", 7},
+    {"^", 8},
+    {"|", 9},
+    {"*", 10}, {"/", 10}, {"%", 10},
     {NULL, 0}
 };
 
@@ -681,14 +684,29 @@ ASTNode *parse_binop_rhs(Parser *p, int prec, ASTNode *lhs) {
         const char *next_op = NULL;
         int next_len = 0;
         int next_prec = get_precedence(p, &next_op, &next_len);
-        if (op_prec < next_prec) {
-            rhs = parse_binop_rhs(p, op_prec + 1, rhs);
+        if (strcmp(op, "=") == 0) {
+            // Assignment is right-associative
+            if (op_prec <= next_prec) {
+                rhs = parse_binop_rhs(p, op_prec, rhs);
+            }
+        } else {
+            // All others are left-associative
+            if (op_prec < next_prec) {
+                rhs = parse_binop_rhs(p, op_prec + 1, rhs);
+            }
         }
-        ASTNode *bin = make_node(AST_BINOP);
-        bin->data.binop.op = strdup2(op, op_len);
-        bin->data.binop.left = lhs;
-        bin->data.binop.right = rhs;
-        lhs = bin;
+        ASTNode *node = NULL;
+        if (strcmp(op, "=") == 0) {
+            node = make_node(AST_ASSIGN);
+            node->data.assign.var = lhs;
+            node->data.assign.expr = rhs;
+        } else {
+            node = make_node(AST_BINOP);
+            node->data.binop.op = strdup2(op, op_len);
+            node->data.binop.left = lhs;
+            node->data.binop.right = rhs;
+        }
+        lhs = node;
     }
 }
 
@@ -763,9 +781,11 @@ ASTNode *parse_statement(Parser *p) {
         expect(p, ';');
         return make_node(AST_CONTINUE);
     } else if (parser_match(p, "auto")) {
-        parse_name(p);
+        char *name = parse_name(p);
         expect(p, ';');
-        return make_node(AST_EMPTY);
+        ASTNode *n = make_node(AST_VAR_DECL);
+        n->data.var_decl.name = name;
+        return n;
     } else if (parser_match(p, "extern")) {
         parser_skip_ws(p);
         char *name = parse_name(p);
@@ -797,22 +817,11 @@ ASTNode *parse_statement(Parser *p) {
         }
     }
     // Assignment or expression
-    ASTNode *lhs = parse_expression(p);
-    parser_skip_ws(p);
-    if (parser_peek(p) == '=') {
-        parser_next(p);
-        ASTNode *rhs = parse_expression(p);
-        expect(p, ';');
-        ASTNode *n = make_node(AST_ASSIGN);
-        n->data.assign.var = lhs;
-        n->data.assign.expr = rhs;
-        return n;
-    } else {
-        expect(p, ';');
-        ASTNode *n = make_node(AST_STATEMENT);
-        n->data.statement.stmt = lhs;
-        return n;
-    }
+    ASTNode *expr = parse_expression(p);
+    expect(p, ';');
+    ASTNode *n = make_node(AST_STATEMENT);
+    n->data.statement.stmt = expr;
+    return n;
 }
 
 // Parse a block: { ... }
@@ -880,6 +889,32 @@ ASTNode *parse_program(Parser *p) {
             n->data.ext.name = name;
             n->data.ext.is_func = 0;
             funcs = append_node(funcs, n);
+        } else if (parser_match(p, "meta")) {
+            expect(p, '{');
+            // Parse balanced brackets content
+            int brace_count = 1;
+            size_t start_pos = p->pos;
+            while (brace_count > 0 && parser_peek(p)) {
+                int c = parser_next(p);
+                if (c == '{') brace_count++;
+                else if (c == '}') brace_count--;
+            }
+            if (brace_count > 0) {
+                parser_error(p, "Unmatched braces in meta construct");
+                return NULL;
+            }
+            // Extract content (excluding the closing brace)
+            size_t end_pos = p->pos - 1;
+            size_t content_len = end_pos - start_pos;
+            char *content = strdup2(p->src + start_pos, content_len);
+            
+            parser_next(p); // Advance past the closing brace to sync cur/pos
+            
+            ASTNode *n = make_node(AST_META);
+            n->data.meta.content = content;
+            funcs = append_node(funcs, n);
+            // The parser position is now at the character after the closing brace
+            // No need to skip whitespace here as it will be done at the end of the loop
         } else if (isalpha(parser_peek(p)) || parser_peek(p) == '_') {
             // Could be function definition or global variable
             size_t save_pos = p->pos;
@@ -907,7 +942,7 @@ ASTNode *parse_program(Parser *p) {
                 funcs = append_node(funcs, n);
             }
         } else {
-            parser_error(p, "Expected 'extern', function definition, or global variable at top level");
+            parser_error(p, "Expected 'extern', 'meta', function definition, or global variable at top level");
         }
         parser_skip_ws(p);
     }

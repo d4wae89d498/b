@@ -2,12 +2,14 @@ main()
 {
     extern printf;
     auto i;
+    auto y;
 
     i = 0;
     while (i < 10)
     {
         printf("%d", i);
-        i = i + 1;
+        y = i + 1;
+        i = y = y;
     }
 }
 

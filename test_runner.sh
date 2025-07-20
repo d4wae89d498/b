@@ -14,7 +14,7 @@ for bfile in tests/*.b; do
     asm_file="${bfile%.b}.s"
     exe_file="${bfile%.b}.out"
     $B_PARSER -S "$bfile" > "$asm_file"
-    gcc -m32 -o "$exe_file" "$asm_file"
+    gcc -m32 -fno-pie -no-pie -o "$exe_file" "$asm_file"
     if [ -n "$expected_exit" ]; then
         ./$exe_file > actual.out 2>&1 || true
         actual_exit=$?

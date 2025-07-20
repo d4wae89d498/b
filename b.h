@@ -11,7 +11,6 @@ typedef enum {
     AST_STATEMENT,
     AST_IF,
     AST_WHILE,
-    AST_FOR,
     AST_RETURN,
     AST_BREAK,
     AST_CONTINUE,
@@ -28,7 +27,9 @@ typedef enum {
     AST_INDEX,
     AST_GLOBAL,
     AST_LABEL,
-    AST_GOTO
+    AST_GOTO,
+    AST_VAR_DECL,
+    AST_META
 } ASTNodeType;
 
 struct ASTNode;
@@ -47,11 +48,10 @@ typedef struct ASTNode {
         struct { struct ASTNode *stmt; } statement;
         struct { struct ASTNode *cond, *then_branch, *else_branch; } if_stmt;
         struct { struct ASTNode *cond, *body; } while_stmt;
-        struct { struct ASTNode *init, *cond, *step, *body; } for_stmt;
         struct { struct ASTNode *expr; } ret;
         struct { struct ASTNode *var, *expr; } assign;
         struct { char *op; struct ASTNode *left, *right; } binop;
-        struct { char *op; struct ASTNode *expr; } unop;
+        struct { char *op; struct ASTNode *expr; int is_postfix; } unop;
         struct { char *name; ASTNodeList *args; struct ASTNode *left; } call;
         struct { char *name; } var;
         struct { int value; } num;
@@ -62,6 +62,8 @@ typedef struct ASTNode {
         struct { char *name; struct ASTNode *init; } global;
         struct { char *label; } label;
         struct { char *label; } go;
+        struct { char *name; } var_decl;
+        struct { char *content; } meta;
     } data;
 } ASTNode;
 

@@ -1,0 +1,16 @@
+b syntax:
+    - [x] fix: assignement as expr not stmt
+    - [ ] meta extension
+    - [x] postfix/prefix ++ --
+    - [ ] switch
+    - [ ] array [e] {...}
+    - [ ] data { ... }
+
+syntax engine:
+    - [ ] make the compiler uses internally function pointers
+    - [ ] tool that generate bindings for the compiler
+    - [ ] mini assembler tool that takes .s, generate machine code using provided bindings, load it into memory and execute
+
+targets:
+    x86:
+        - [ ] better register allocation strategy

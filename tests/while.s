@@ -1,4 +1,6 @@
 .intel_syntax noprefix
+.section .note.GNU-stack,"",@progbits
+.text
 .data
 .data
 str0: .asciz "%d"
@@ -7,7 +9,9 @@ str0: .asciz "%d"
 main:
     push ebp
     mov ebp, esp
-    sub esp, 4 #locals
+    sub esp, 8 #locals
+#    i variable declaration
+#    y variable declaration
     lea eax, [ebp-4] #var i
     push eax #save lvalue addr
     mov eax, 0
@@ -28,9 +32,11 @@ main:
     push eax #arg 1
     lea eax, [str0] #string literal
     push eax #arg 0
+    sub esp, 4 #align stack to 16 bytes
     call printf
+    add esp, 4 #restore stack alignment
     add esp, 8 #pop args
-    lea eax, [ebp-4] #var i
+    lea eax, [ebp-8] #var y
     push eax #save lvalue addr
     mov eax, [ebp-4] #var i
     push eax
@@ -38,6 +44,15 @@ main:
     mov ebx, eax
     pop eax
     add eax, ebx
+    pop ebx #restore lvalue addr
+    mov [ebx], eax #assign
+    lea eax, [ebp-4] #var i
+    push eax #save lvalue addr
+    lea eax, [ebp-8] #var y
+    push eax #save lvalue addr
+    mov eax, [ebp-8] #var y
+    pop ebx #restore lvalue addr
+    mov [ebx], eax #assign
     pop ebx #restore lvalue addr
     mov [ebx], eax #assign
     jmp .L0

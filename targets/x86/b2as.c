@@ -1,6 +1,12 @@
 #include <stdio.h>
-#include "../b.h"
+#include "../../b.h"
 #include <string.h>
+
+// Forward declaration for meta construct evaluation
+void evaluate_meta_construct(const char *content);
+
+// Forward declaration for meta construct evaluation
+void evaluate_meta_construct(const char *content);
 
 #define ASMEND "#"
 
@@ -391,7 +397,11 @@ static void gen_expr(ASTNode *expr, FILE *out) {
                 fprintf(out, "    push eax " ASMEND "arg %d\n", j);
             }
             if (expr->data.call.name) {
+                // Ensure 16-byte stack alignment for external function calls
+                // Stack is currently 8 bytes from original, need 12 bytes for 16-byte alignment after call
+                fprintf(out, "    sub esp, 4 " ASMEND "align stack to 16 bytes\n");
                 fprintf(out, "    call %s\n", expr->data.call.name);
+                fprintf(out, "    add esp, 4 " ASMEND "restore stack alignment\n");
             } else if (expr->data.call.left) {
                 gen_expr(expr->data.call.left, out);
                 fprintf(out, "    call eax " ASMEND "indirect call\n");
@@ -502,6 +512,12 @@ static void gen_stmt(ASTNode *stmt, FILE *out) {
         case AST_STATEMENT:
             gen_expr(stmt->data.statement.stmt, out);
             break;
+        case AST_META:
+            // Handle meta construct by sending to as_jit.c for evaluation
+            fprintf(out, ASMEND " Meta construct: %s\n", stmt->data.meta.content);
+            // Call the meta evaluation function
+            evaluate_meta_construct(stmt->data.meta.content);
+            break;
         default:
             // TODO: handle more statements
             break;
@@ -528,10 +544,30 @@ static void gen_function(ASTNode *fn, FILE *out) {
     // Body
     if (fn->data.function.body)
         gen_stmt(fn->data.function.body, out);
-    // Epilogue (if not already returned)
-    fprintf(out, "    mov esp, ebp\n");
-    fprintf(out, "    pop ebp\n");
-    fprintf(out, "    ret\n");
+    // Epilogue (only if not already returned)
+    // Check if the last statement was a return
+    if (fn->data.function.body && fn->data.function.body->type == AST_BLOCK) {
+        ASTNodeList *stmts = fn->data.function.body->data.block.statements;
+        if (stmts) {
+            // Find the last statement
+            while (stmts->next) stmts = stmts->next;
+            if (stmts->node->type != AST_RETURN) {
+                fprintf(out, "    mov esp, ebp\n");
+                fprintf(out, "    pop ebp\n");
+                fprintf(out, "    ret\n");
+            }
+        } else {
+            // Empty function body, need epilogue
+            fprintf(out, "    mov esp, ebp\n");
+            fprintf(out, "    pop ebp\n");
+            fprintf(out, "    ret\n");
+        }
+    } else if (!fn->data.function.body) {
+        // No function body, need epilogue
+        fprintf(out, "    mov esp, ebp\n");
+        fprintf(out, "    pop ebp\n");
+        fprintf(out, "    ret\n");
+    }
 }
 
 // Helper: collect global variables from AST
@@ -614,6 +650,8 @@ void generate_x86(ASTNode *ast, FILE *out) {
         for (ASTNodeList *l = ast->data.program.functions; l; l = l->next) {
             if (l->node->type == AST_FUNCTION)
                 gen_function(l->node, out);
+            else if (l->node->type == AST_META)
+                gen_stmt(l->node, out);
         }
     } else if (ast->type == AST_FUNCTION) {
         gen_function(ast, out);
