@@ -2,8 +2,11 @@ meta {
     extern printf;
     
     main() {
-        printf("Hell!\n");
-        return 0;
+        auto k;
+
+        printf("# [test from META %i] ... #\n", 42);
+        
+        return 21;
     }
 }
 

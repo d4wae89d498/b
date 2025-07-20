@@ -215,6 +215,119 @@ static void emit_string_literals(FILE *out) {
     }
 }
 
+// Update stack_offset for pushes/pops and sub/add esp
+#define UPDATE_STACK_PUSH() (stack_offset -= 4)
+#define UPDATE_STACK_POP()  (stack_offset += 4)
+#define UPDATE_STACK_SUB(N) (stack_offset -= (N))
+#define UPDATE_STACK_ADD(N) (stack_offset += (N))
+
+static int entry_align_amount = 0;
+
+static int get_entry_alignment(int locals) {
+    // At function entry after push ebp (4), mov ebp, esp, sub esp, locals
+    // We want esp to be 16-byte aligned
+    int esp_offset = 4 + locals; // 4 for push ebp, locals is positive
+    int misalign = esp_offset % 16;
+    if (misalign == 0) return 0;
+    return 16 - misalign;
+}
+
+static void gen_function(ASTNode *fn, FILE *out) {
+    // Reset locals and params for each function
+    num_locals = 0;
+    num_params = 0;
+    stack_offset = 0;
+    // Add parameters first
+    add_params(fn->data.function.params);
+    // Collect locals
+    if (fn->data.function.body)
+        collect_locals(fn->data.function.body);
+    assign_local_offsets();
+    int locals = -stack_offset;
+    fprintf(out, ".globl %s\n", fn->data.function.name);
+    fprintf(out, "%s:\n", fn->data.function.name);
+    // Prologue (always emit, even if no locals)
+    fprintf(out, "    push ebp\n");
+    fprintf(out, "    mov ebp, esp\n");
+    fprintf(out, "    sub esp, %d " ASMEND "locals\n", locals);
+    int saved_stack_offset = stack_offset; // Save for epilogue
+    // Body
+    if (fn->data.function.body) {
+        int old_stack_offset = stack_offset;
+        gen_stmt(fn->data.function.body, out);
+        stack_offset = old_stack_offset; // Restore after body
+    }
+    // Epilogue (always emit)
+    fprintf(out, "    mov esp, ebp\n");
+    fprintf(out, "    pop ebp\n");
+    fprintf(out, "    ret\n");
+    stack_offset = saved_stack_offset; // Restore for next function
+}
+
+// Helper: collect global variables from AST
+static void collect_globals(ASTNode *ast) {
+    if (!ast) return;
+    if (ast->type == AST_PROGRAM) {
+        for (ASTNodeList *l = ast->data.program.functions; l; l = l->next)
+            collect_globals(l->node);
+    } else if (ast->type == AST_GLOBAL) {
+        if (num_globals < MAX_GLOBALS) {
+            global_names[num_globals] = ast->data.global.name;
+            if (ast->data.global.init && ast->data.global.init->type == AST_NUM)
+                global_inits[num_globals] = ast->data.global.init->data.num.value;
+            else
+                global_inits[num_globals] = 0;
+            num_globals++;
+        }
+    }
+}
+
+static void collect_strings(ASTNode *n) {
+    if (!n) return;
+    if (n->type == AST_STRING) get_string_label(n->data.string_lit.value);
+    #define RECURSE(x) collect_strings(x)
+    switch (n->type) {
+        case AST_PROGRAM:
+            for (ASTNodeList *l = n->data.program.functions; l; l = l->next) RECURSE(l->node); break;
+        case AST_FUNCTION:
+            for (ASTNodeList *l = n->data.function.params; l; l = l->next) RECURSE(l->node);
+            RECURSE(n->data.function.body); break;
+        case AST_BLOCK:
+            for (ASTNodeList *l = n->data.block.statements; l; l = l->next) RECURSE(l->node); break;
+        case AST_STATEMENT:
+            RECURSE(n->data.statement.stmt); break;
+        case AST_IF:
+            RECURSE(n->data.if_stmt.cond); RECURSE(n->data.if_stmt.then_branch); RECURSE(n->data.if_stmt.else_branch); break;
+        case AST_WHILE:
+            RECURSE(n->data.while_stmt.cond); RECURSE(n->data.while_stmt.body); break;
+        case AST_RETURN:
+            RECURSE(n->data.ret.expr); break;
+        case AST_ASSIGN:
+            RECURSE(n->data.assign.var); RECURSE(n->data.assign.expr); break;
+        case AST_BINOP:
+            RECURSE(n->data.binop.left); RECURSE(n->data.binop.right); break;
+        case AST_UNOP:
+            RECURSE(n->data.unop.expr); break;
+        case AST_CALL:
+            for (ASTNodeList *l = n->data.call.args; l; l = l->next) RECURSE(l->node);
+            if (n->data.call.left) RECURSE(n->data.call.left); break;
+        case AST_INDEX:
+            RECURSE(n->data.index.array); RECURSE(n->data.index.index); break;
+        case AST_GLOBAL:
+            RECURSE(n->data.global.init); break;
+        default: break;
+    }
+    #undef RECURSE
+}
+
+static int get_stack_alignment(int current_offset, int num_args) {
+    // At call site, want esp 16-byte aligned after pushes
+    int esp_offset = -current_offset + num_args * 4 + 4; // -current_offset for locals+entry align, num_args*4 for pushes, 4 for call ret
+    int misalign = esp_offset % 16;
+    if (misalign == 0) return 0;
+    return 16 - misalign;
+}
+
 static void gen_expr(ASTNode *expr, FILE *out) {
     if (!expr) return;
     switch (expr->type) {
@@ -392,9 +505,11 @@ static void gen_expr(ASTNode *expr, FILE *out) {
             ASTNodeList *args[64];
             int i = 0;
             for (ASTNodeList *l = expr->data.call.args; l; l = l->next) args[i++] = l;
+
             for (int j = argc-1; j >= 0; --j) {
                 gen_expr(args[j]->node, out);
                 fprintf(out, "    push eax " ASMEND "arg %d\n", j);
+                UPDATE_STACK_PUSH();
             }
             if (expr->data.call.name) {
                 fprintf(out, "    call %s\n", expr->data.call.name);
@@ -404,8 +519,11 @@ static void gen_expr(ASTNode *expr, FILE *out) {
             } else {
                 fprintf(out, "; invalid call node\n");
             }
-            if (argc > 0)
-                fprintf(out, "    add esp, %d " ASMEND "pop args\n", argc*4);
+            int cleanup = argc * 4;
+            if (cleanup > 0) {
+                fprintf(out, "    add esp, %d #cleanup args+align\n", cleanup);
+                UPDATE_STACK_ADD(cleanup);
+            }
             break;
         }
         case AST_ASSIGN:
@@ -510,116 +628,16 @@ static void gen_stmt(ASTNode *stmt, FILE *out) {
             break;
         case AST_META:
             // Handle meta construct by sending to as_jit.c for evaluation
-            fprintf(out, ASMEND " Meta construct: %s\n", stmt->data.meta.content);
+            fprintf(out, ASMEND " Start of Meta construct\n");//, stmt->data.meta.content);
             // Call the meta evaluation function
             evaluate_meta_construct(stmt->data.meta.content);
+            fprintf(out, "\n");
+            fprintf(out, ASMEND " End of Meta construct\n");
             break;
         default:
             // TODO: handle more statements
             break;
     }
-}
-
-static void gen_function(ASTNode *fn, FILE *out) {
-    // Reset locals and params for each function
-    num_locals = 0;
-    num_params = 0;
-    stack_offset = 0;
-    // Add parameters first
-    add_params(fn->data.function.params);
-    // Collect locals
-    if (fn->data.function.body)
-        collect_locals(fn->data.function.body);
-    assign_local_offsets();
-    fprintf(out, ".globl %s\n", fn->data.function.name);
-    fprintf(out, "%s:\n", fn->data.function.name);
-    // Prologue
-    fprintf(out, "    push ebp\n");
-    fprintf(out, "    mov ebp, esp\n");
-    fprintf(out, "    sub esp, %d " ASMEND "locals\n", -stack_offset);
-    // Body
-    if (fn->data.function.body)
-        gen_stmt(fn->data.function.body, out);
-    // Epilogue (only if not already returned)
-    // Check if the last statement was a return
-    if (fn->data.function.body && fn->data.function.body->type == AST_BLOCK) {
-        ASTNodeList *stmts = fn->data.function.body->data.block.statements;
-        if (stmts) {
-            // Find the last statement
-            while (stmts->next) stmts = stmts->next;
-            if (stmts->node->type != AST_RETURN) {
-                fprintf(out, "    mov esp, ebp\n");
-                fprintf(out, "    pop ebp\n");
-                fprintf(out, "    ret\n");
-            }
-        } else {
-            // Empty function body, need epilogue
-            fprintf(out, "    mov esp, ebp\n");
-            fprintf(out, "    pop ebp\n");
-            fprintf(out, "    ret\n");
-        }
-    } else if (!fn->data.function.body) {
-        // No function body, need epilogue
-        fprintf(out, "    mov esp, ebp\n");
-        fprintf(out, "    pop ebp\n");
-        fprintf(out, "    ret\n");
-    }
-}
-
-// Helper: collect global variables from AST
-static void collect_globals(ASTNode *ast) {
-    if (!ast) return;
-    if (ast->type == AST_PROGRAM) {
-        for (ASTNodeList *l = ast->data.program.functions; l; l = l->next)
-            collect_globals(l->node);
-    } else if (ast->type == AST_GLOBAL) {
-        if (num_globals < MAX_GLOBALS) {
-            global_names[num_globals] = ast->data.global.name;
-            if (ast->data.global.init && ast->data.global.init->type == AST_NUM)
-                global_inits[num_globals] = ast->data.global.init->data.num.value;
-            else
-                global_inits[num_globals] = 0;
-            num_globals++;
-        }
-    }
-}
-
-static void collect_strings(ASTNode *n) {
-    if (!n) return;
-    if (n->type == AST_STRING) get_string_label(n->data.string_lit.value);
-    #define RECURSE(x) collect_strings(x)
-    switch (n->type) {
-        case AST_PROGRAM:
-            for (ASTNodeList *l = n->data.program.functions; l; l = l->next) RECURSE(l->node); break;
-        case AST_FUNCTION:
-            for (ASTNodeList *l = n->data.function.params; l; l = l->next) RECURSE(l->node);
-            RECURSE(n->data.function.body); break;
-        case AST_BLOCK:
-            for (ASTNodeList *l = n->data.block.statements; l; l = l->next) RECURSE(l->node); break;
-        case AST_STATEMENT:
-            RECURSE(n->data.statement.stmt); break;
-        case AST_IF:
-            RECURSE(n->data.if_stmt.cond); RECURSE(n->data.if_stmt.then_branch); RECURSE(n->data.if_stmt.else_branch); break;
-        case AST_WHILE:
-            RECURSE(n->data.while_stmt.cond); RECURSE(n->data.while_stmt.body); break;
-        case AST_RETURN:
-            RECURSE(n->data.ret.expr); break;
-        case AST_ASSIGN:
-            RECURSE(n->data.assign.var); RECURSE(n->data.assign.expr); break;
-        case AST_BINOP:
-            RECURSE(n->data.binop.left); RECURSE(n->data.binop.right); break;
-        case AST_UNOP:
-            RECURSE(n->data.unop.expr); break;
-        case AST_CALL:
-            for (ASTNodeList *l = n->data.call.args; l; l = l->next) RECURSE(l->node);
-            if (n->data.call.left) RECURSE(n->data.call.left); break;
-        case AST_INDEX:
-            RECURSE(n->data.index.array); RECURSE(n->data.index.index); break;
-        case AST_GLOBAL:
-            RECURSE(n->data.global.init); break;
-        default: break;
-    }
-    #undef RECURSE
 }
 
 // Emit .data section for globals before functions

@@ -178,6 +178,9 @@ void free_ast(ASTNode *node) {
         case AST_META:
             free(node->data.meta.content);
             break;
+        case AST_VAR_DECL:
+            free(node->data.var_decl.name);
+            break;
         default: break;
     }
     free(node);
@@ -306,8 +309,11 @@ void print_ast(ASTNode *node, int indent) {
         case AST_META:
             printf("Meta: %s\n", node->data.meta.content);
             break;
+        case AST_VAR_DECL:
+            printf("VarDecl: %s\n", node->data.var_decl.name);
+            break;
         default:
-            printf("(Unknown node)\n");
+            printf("(Unknown node, type=%d)\n", node->type);
     }
 }
 
