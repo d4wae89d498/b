@@ -397,11 +397,7 @@ static void gen_expr(ASTNode *expr, FILE *out) {
                 fprintf(out, "    push eax " ASMEND "arg %d\n", j);
             }
             if (expr->data.call.name) {
-                // Ensure 16-byte stack alignment for external function calls
-                // Stack is currently 8 bytes from original, need 12 bytes for 16-byte alignment after call
-                fprintf(out, "    sub esp, 4 " ASMEND "align stack to 16 bytes\n");
                 fprintf(out, "    call %s\n", expr->data.call.name);
-                fprintf(out, "    add esp, 4 " ASMEND "restore stack alignment\n");
             } else if (expr->data.call.left) {
                 gen_expr(expr->data.call.left, out);
                 fprintf(out, "    call eax " ASMEND "indirect call\n");

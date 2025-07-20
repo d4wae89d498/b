@@ -2,7 +2,7 @@ meta {
     extern printf;
     
     main() {
-        printf("Helloooooo\n");
+        printf("Hell!\n");
         return 0;
     }
 }

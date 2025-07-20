@@ -1,6 +1,6 @@
 b syntax:
     - [x] fix: assignement as expr not stmt
-    - [ ] meta extension
+    - [x] meta extension
     - [x] postfix/prefix ++ --
     - [ ] switch
     - [ ] array [e] {...}
@@ -10,7 +10,8 @@ syntax engine:
     - [ ] make the compiler uses internally function pointers
     - [ ] tool that generate bindings for the compiler
     - [ ] mini assembler tool that takes .s, generate machine code using provided bindings, load it into memory and execute
-
+        - [x] prototype (targets/x86/as_jit.c)
+        - [ ] check for what meta_demo.b outputs segfault (stack alignement, lea with relative offsets...)
 targets:
     x86:
         - [ ] better register allocation strategy

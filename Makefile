@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-std=c99 -Wall -Wextra -fno-pie -no-pie -m32 -ldl #-fsanitize=address -g
+CFLAGS=-std=c99 -Wall -Wextra -fno-pie -no-pie -m32 -ldl
 
 SRC=b.c
 X86=targets/x86/b2as.c

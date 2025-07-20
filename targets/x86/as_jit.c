@@ -109,11 +109,6 @@ int parse_instruction(const char *line, Instruction *inst) {
             inst->modrm = 0xEC;
             inst->imm8 = 0x00;
             inst->size = 3;
-        } else if (strstr(line, "esp, 4")) {
-            inst->opcode = 0x83; // sub esp, 4
-            inst->modrm = 0xEC;
-            inst->imm8 = 0x04;
-            inst->size = 3;
         }
         return 1;
     } else if (strncmp(line, "lea", 3) == 0) {
@@ -386,8 +381,8 @@ int assemble_instructions(Assembler *assembler) {
 void *execute_code(Assembler *assembler) {
     // Allocate executable memory with data section at fixed offset
     size_t total_size = 4096; // Use a fixed size
-    void *exec_mem = mmap(NULL, total_size, PROT_READ | PROT_WRITE | PROT_EXEC, 
-                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    void *exec_mem = mmap((void*)0x10000000, total_size, PROT_READ | PROT_WRITE | PROT_EXEC, 
+                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
     
     if (exec_mem == MAP_FAILED) {
         perror("mmap failed");
@@ -471,7 +466,7 @@ void evaluate_meta_construct(const char *content) {
     FILE *temp_file = tmpfile();
     if (!temp_file) {
         fprintf(stderr, "Failed to create temporary file\n");
-        //free_ast(program);
+        free_ast(program);
         return;
     }
     
@@ -571,10 +566,15 @@ void evaluate_meta_construct(const char *content) {
     }
     
     // Cleanup
+    printf("About to munmap exec_mem at %p\n", exec_mem);
     munmap(exec_mem, 4096);
+    printf("munmap completed\n");
     assembler_cleanup(&assembler);
+    printf("assembler_cleanup completed\n");
     free_ast(program);
+    printf("free_ast completed\n");
     fclose(temp_file);
+    printf("fclose completed\n");
     
     printf("=== Meta Construct Evaluation Complete ===\n\n");
 } 

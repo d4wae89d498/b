@@ -69,7 +69,6 @@ int main(int argc, char **argv) {
     ASTNode *ast = parse_program(&parser);
     if (ast) {
         generate_x86(ast, stdout);
-        exit(0);
         if (!dump_asm) {
             print_ast(ast, 0);
         }
