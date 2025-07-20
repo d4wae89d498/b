@@ -65,4 +65,5 @@ meta
         parse_identifier = &my_parse_identifier;
     }
 }
+// At this point, my_parse_identifier is used instead of builtin parse_identifier
 ```
