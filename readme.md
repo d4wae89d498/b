@@ -46,13 +46,14 @@ Features such as type checking or new semantics could be implemented as compile-
 ```c
 meta
 {
-  parse_identifier(p)
-  {
-    extern _parse_name;
-    extern _parser_skip_ws;
+    my_parse_identifier(p)
+    {
+        extern _parse_name;
+        // ... other exposed compiler primitives...
+        extern _parser_skip_ws;
   
         n = make_node(AST_VAR);
-//...
+        //... some new innovative identifier parsing...
         n[STRUCT_AST_VAR_NAME] = name;
         return n;
     }
